@@ -1,5 +1,6 @@
-import requests
+import httpx
 import json
+import asyncio
 import logging
 
 # Set up logging
@@ -9,55 +10,50 @@ logger = logging.getLogger(__name__)
 # Ollama API endpoint
 OLLAMA_API = "http://localhost:11434/api/generate"
 
-def generate_summary(text):
+async def generate_summary(text):
     max_input_length = 4096
     chunks = chunk_text(text, max_input_length)
     summary = ""
-    try:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         for chunk in chunks:
-            payload = {
-                "model": "llama3.1:70b",
-                "prompt": f"""Summarize the following text in 50-150 words, focusing on key details such as location, area, zoning, or legal terms if applicable:\n{chunk}""",
-                "stream": False
-            }
-            response = requests.post(OLLAMA_API, json=payload)
-            if response.status_code == 200:
+            try:
+                payload = {
+                    "model": "llama3.1:70b",
+                    "prompt": f"""Summarize this in 50-150 words, hitting key details like location, area, zoning, or legal terms:\n{chunk}""",
+                    "stream": False
+                }
+                response = await client.post(OLLAMA_API, json=payload)
+                response.raise_for_status()
                 summary += json.loads(response.text)["response"] + " "
-            else:
-                logger.error(f"Ollama summarization failed: {response.text}")
-                raise Exception("Ollama summarization failed")
-        logger.info("Summary generated successfully")
-        return summary.strip()
-    except Exception as e:
-        logger.error(f"Summary generation failed: {e}")
-        return "Summary generation failed."
+                logger.info("Summary chunk generated")
+            except Exception as e:
+                logger.error(f"Summary chunk failed: {e}")
+                return "Summary failed, maccha!"
+    return summary.strip()
 
-def answer_query(question, context):
+async def answer_query(question, context):
     try:
-        # Dynamic prompt for flexible question answering
-        prompt = f"""You are an expert in real estate document analysis. Using the provided context, answer the question as accurately and concisely as possible. If the question is open-ended, provide a detailed response. If the answer is not in the context, say so clearly.
+        prompt = f"""You're a real estate doc genius, maccha! Using the context, answer the question sharp and clear. For open-ended stuff, give a solid breakdown. If the answer ain't in the context, say so straight up.
 
 Context: {context}
 
 Question: {question}
 
 Answer:"""
-        payload = {
-            "model": "llama3.1:70b",
-            "prompt": prompt,
-            "stream": False
-        }
-        response = requests.post(OLLAMA_API, json=payload)
-        if response.status_code == 200:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            payload = {
+                "model": "llama3.1:70b",
+                "prompt": prompt,
+                "stream": False
+            }
+            response = await client.post(OLLAMA_API, json=payload)
+            response.raise_for_status()
             answer = json.loads(response.text)["response"].strip()
             logger.info(f"Query answered: {question}")
             return answer
-        else:
-            logger.error(f"Ollama query failed: {response.text}")
-            raise Exception("Ollama query failed")
     except Exception as e:
-        logger.error(f"Query processing failed: {e}")
-        return "Query processing failed."
+        logger.error(f"Query failed: {e}")
+        return "Query bombed, dude!"
 
 def chunk_text(text, max_length=4096):
     words = text.split()

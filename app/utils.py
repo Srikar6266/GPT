@@ -15,7 +15,7 @@ def preprocess_image(image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         enhanced = cv2.convertScaleAbs(gray, alpha=1.5, beta=0)
         denoised = cv2.fastNlMeansDenoising(enhanced)
-        logger.info("Image preprocessed successfully")
+        logger.info("Image preprocessed")
         return Image.fromarray(cv2.cvtColor(denoised, cv2.COLOR_GRAY2RGB))
     except Exception as e:
         logger.error(f"Image preprocessing failed: {e}")
