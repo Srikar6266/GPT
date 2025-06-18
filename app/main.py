@@ -1,58 +1,61 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import os
-import sqlite3
-from ocr import extract_text
+import asyncio
+from ocr import extract_text_batch
 from llm import generate_summary, answer_query
 from utils import preprocess_image
 from pdf2image import convert_from_path
+from database import init_db, store_document, get_document_text
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Database setup
-DB_PATH = "documents.db"
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS documents
-                 (id INTEGER PRIMARY KEY, filename TEXT, text TEXT, summary TEXT)''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# Ensure pdfs directory exists
-os.makedirs("pdfs", exist_ok=True)
+# Initialize DB
+@app.on_event("startup")
+async def startup_event():
+    await init_db()
+    os.makedirs("pdfs", exist_ok=True)
+    logger.info("App started, DB initialized, pdfs dir ready")
 
 # Upload and process PDF
 @app.post("/upload_pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        logger.error("Invalid file: not a PDF")
+        raise HTTPException(status_code=400, detail="Only PDF files allowed, maccha!")
     
     pdf_path = f"pdfs/{file.filename}"
-    with open(pdf_path, "wb") as f:
-        f.write(await file.read())
-    
-    # Convert PDF to images and preprocess
-    images = convert_from_path(pdf_path)
-    text = ""
-    for image in images:
-        preprocessed = preprocess_image(image)
-        text += extract_text(preprocessed) + "\n"
-    
-    # Generate summary
-    summary = generate_summary(text)
-    
-    # Store in database
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO documents (filename, text, summary) VALUES (?, ?, ?)",
-              (file.filename, text, summary))
-    conn.commit()
-    conn.close()
-    
-    return JSONResponse({"filename": file.filename, "summary": summary})
+    try:
+        # Save PDF
+        with open(pdf_path, "wb") as f:
+            f.write(await file.read())
+        
+        # Convert PDF to images
+        images = convert_from_path(pdf_path)
+        preprocessed_images = [preprocess_image(image) for image in images]
+        
+        # Batch extract text
+        text = await extract_text_batch(preprocessed_images)
+        
+        # Generate summary async
+        summary = await generate_summary(text)
+        
+        # Store in DB
+        await store_document(file.filename, text, summary)
+        logger.info(f"PDF processed: {file.filename}")
+        return JSONResponse({
+            "filename": file.filename,
+            "summary": summary,
+            "message": "PDF uploaded and ready to roll, dude!"
+        })
+    except Exception as e:
+        logger.error(f"PDF processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Oops, something broke: {str(e)}")
 
 # Query endpoint
 @app.post("/query/")
@@ -61,18 +64,24 @@ async def query_document(data: dict):
     filename = data.get("filename")
     
     if not question or not filename:
-        raise HTTPException(status_code=400, detail="Question and filename required")
+        logger.error("Missing question or filename")
+        raise HTTPException(status_code=400, detail="Gimme a question and filename, maccha!")
     
-    # Retrieve document text
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT text FROM documents WHERE filename = ?", (filename,))
-    result = c.fetchone()
-    conn.close()
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    text = result[0]
-    answer = answer_query(question, text)
-    return JSONResponse({"answer": answer})
+    try:
+        # Get document text
+        text = await get_document_text(filename)
+        if not text:
+            logger.error(f"Document not found: {filename}")
+            raise HTTPException(status_code=404, detail="No such doc, dude!")
+        
+        # Answer query async
+        answer = await answer_query(question, text)
+        logger.info(f"Query answered for {filename}: {question}")
+        return JSONResponse({
+            "question": question,
+            "answer": answer,
+            "message": "Nailed it, maccha!"
+        })
+    except Exception as e:
+        logger.error(f"Query failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Query crashed: {str(e)}")
