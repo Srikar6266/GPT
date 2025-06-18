@@ -19,4 +19,4 @@ def preprocess_image(image):
         return Image.fromarray(cv2.cvtColor(denoised, cv2.COLOR_GRAY2RGB))
     except Exception as e:
         logger.error(f"Image preprocessing failed: {e}")
-        raise
+        raise   

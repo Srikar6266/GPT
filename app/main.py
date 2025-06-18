@@ -84,4 +84,4 @@ async def query_document(data: dict):
         })
     except Exception as e:
         logger.error(f"Query failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Query crashed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Query crashed: {str(e)}")     
